@@ -1,5 +1,5 @@
 -module(main).
--export([start/0,hashMapSite/3,siteCreator/2,hmSite/7,checkRoute/4,isSame/2]).
+-export([start/0,hashMapSite/3,siteCreator/3,hmSite/7,checkRoute/4,isSame/2,clientPrint/0]).
 -import(util,[hash/2,getRandomNode/0]).
 -import(math,[pow/2]).
 -import(timer,[sleep/1]).
@@ -21,38 +21,47 @@ handleRequest(query) ->
 	{ok, [QID, Origin, Key]} = io:fread("", "~d ~d ~s"),
 	io:format("querying key=~s starting at node=~b ID=~b~n", [Key, Origin, QID]),
 	FromNode = list_to_atom(integer_to_list(Origin)),
-	FromNode ! {query,Key,QID};
+	FromNode ! {query,Key,QID,Origin};
 handleRequest(stop) -> self() ! finish;
 handleRequest(Request) -> io:format("ERROR: Illegal request ~p~n", [Request]).
 processRequests() ->
 	{ok, [RequestString]} = io:fread("", "~s"),
 	Request = list_to_atom(RequestString),
 	handleRequest(Request),
-	%processRequests().
+	processRequests().
 
-	receive
-		{K,V,ID,From} ->
-			io:format("Request ~b send to node ~b has K ~s and V ~s~n",[ID,From,K,V]),
-			processRequests()
+%	receive
+%		{K,V,From,{ID,Init}} ->
+%			io:format("Request ~b send to node ~b has K ~s and V ~s in ~b~n",[ID,From,K,V,Init]),
+%			processRequests()
+%	after 
+%		0 ->
+%			%{ok,[RequestString]} = io:fread("","~s"),
+%			%Request = list_to_atom(RequestString),
+%			handleRequest(Request),
+%			processRequests()
+%	end.
+
+clientPrint() ->
+	receive 
+		{K,V,N,{A,I}} ->
+			io:format("Request ~b sent to agent ~b: Value for key ~s stored in node ~b: ~s~n",[A,I,K,N,V]),
+			clientPrint()
 	after 
 		0 ->
-			%{ok,[RequestString]} = io:fread("","~s"),
-			%Request = list_to_atom(RequestString),
-			handleRequest(Request),
-			processRequests()
+			clientPrint()
 	end.
-
 
 hashMapSite(Key,Value,Node) ->
 	io:fwrite("key is ~s and value is ~s and the hashkey is ~b and the pid is ~p~n",[Key,Value,util:hash(Key,Node),self()]).
 
-siteCreator(-1,Num) -> true;%io:fwrite(" ~b done~n",[Num]);
-siteCreator(N,Num) -> 
+siteCreator(-1,Num,Address) -> true;%io:fwrite(" ~b done~n",[Num]);
+siteCreator(N,Num,Address) -> 
 	%io:fwrite("~b ",[N]),
-	Site = spawn(main,hmSite,[N,"_null_","_null_",Num,false,self(),[]]),
+	Site = spawn(main,hmSite,[N,"_null_","_null_",Num,false,Address,[]]),
 	Name = list_to_atom(integer_to_list(N)),
 	register(Name,Site),
-	siteCreator(N-1,Num).
+	siteCreator(N-1,Num,Address).
 
 isSame(I1,A2) -> list_to_atom(integer_to_list(I1)) == A2.
 hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
@@ -60,33 +69,34 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 	receive
 		{K,V} -> hmSite(Name,K,V,N,Ready,Loc,IDs);
 		{insert,K,V} -> 
-			Dest = hash(K,N),
+			Dest = util:hash(K,N),
 			if Dest == Name -> hmSite(Name,K,V,N,true,Loc,IDs);
 			   true ->
-				   io:format("K is ~s V is ~s H is ~b N is ~b~n",[K,V,hash(K,N),Name]),
+				   %io:format("K is ~s V is ~s H is ~b N is ~b~n",[K,V,hash(K,N),Name]),
 				   NewDest = checkRoute(Name,Dest,0,N),
 				   NewDestName = list_to_atom(integer_to_list(NewDest)),
 				   NewDestName ! {insert,K,V},
-				   io:format("sending to ~b~n",[NewDest]),
+				   %io:format("sending to ~b~n",[NewDest]),
 				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
 			end;
-		{query,K,A} ->
-			Dest = hash(K,N),
+		{query,K,A,Init} ->
+			Dest = util:hash(K,N),
+			io:format("To ~b~n",[Dest]),
 			if Dest == Name->
 				   if Ready -> 
-					      io:format("In ~b K is ~s V is ~s to Agent ~b is ~w~n",[Name,Key,Value,A,Ready]),
-					      Loc ! {Key,Value,A,Name},
+					      %io:format("In ~b K is ~s V is ~s to Agent ~b is ~w~n",[Name,Key,Value,A,Ready]),
+					      Loc ! {Key,Value,Name,{A,Init}},
 					      hmSite(Name,Key,Value,N,Ready,Loc,IDs);
 				      not Ready -> 
-					      NewIDs = IDs ++ [A],
-					      io:format("Wait ~b~n",[Name]),
+					      NewIDs = IDs ++ [{A,Init}],
+					     %io:format("Wait ~b~n",[Name]),
 					      hmSite(Name,Key,Value,N,Ready,Loc,NewIDs)
 				   end;
 			   true ->
 				   NewDest = checkRoute(Name,Dest,0,N),
 				   NewDestName = list_to_atom(integer_to_list(NewDest)),
-				   NewDestName ! {query,K,A},
-				   io:format("~b ask other ~b~n",[Name,NewDest]),
+				   NewDestName ! {query,K,A,Init},
+				   %io:format("~b ask other ~b~n",[Name,NewDest]),
 				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
 			end;
 
@@ -95,7 +105,7 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 	after 
 		0 ->
 			if Ready ->
-				   [ Loc ! {Key,Value,X,Name} || X <- IDs, X < N],
+				   [ Loc ! {Key,Value,Name,X} || X <- IDs],
 				   hmSite(Name,Key,Value,N,Ready,Loc,[]);
 			   true -> 
 				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
@@ -117,30 +127,12 @@ checkRoute(From,Dest,N,Num) ->
 		true -> checkRoute(From,Dest,N+1,Num)
 	end.
 
-%printQuery() ->
-	%receive 
-	%	{Key,Value,ID,From,FromInit} ->
-	%		io:format("Request ~b sent to agent ~b: Value of Key ~s stored in Node ~b: ~s",[ID,FromInit,Key,From,Value]),
-	%		printQuery()
-	%after 
-	%	0 ->
-	%		printQuery()
-	%end.
 start() ->
 	{ok, [N]} = io:fread("", "~d"),
 	Nodes = round(math:pow(2, N)),
 	io:format("With ~b nodes, key \"cat\" belongs in node ~b  in Node~p~n \n", [Nodes, util:hash("cat", Nodes),node()]),
 	%io:fromat("Host: ~w~n",[nodes()]),
-	siteCreator(Nodes-1,N),
-	%whereis('1') ! {"cat","fish","insert"},
-	%whereis('1') ! {insert,"test","fish"},
-	%whereis('1') ! insert,
-	%whereis('1') ! stop,
-	%sleep(200),
-	%whereis('1') ! {query,"test",1},
-	%sleep(200),
-	%whereis('1') ! stop,
-	%whereis('0') ! stop.
-	%C = checkRoute(15,8,0,4),
-	%io:fwrite("Path is ~b ~n",[C]).
-	processRequests().
+	%ClientAgent = spawn(main,clientPrint,[]),
+	%register(client, ClientAgent),
+	%siteCreator(Nodes-1,N,ClientAgent),
+	%processRequests().
