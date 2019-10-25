@@ -68,8 +68,9 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 
 	receive
 		{K,V} -> hmSite(Name,K,V,N,Ready,Loc,IDs);
-		{insert,K,V} -> 
-			Dest = util:hash(K,N),
+		{insert,K,V} ->
+		        Nodes = round(pow(2,N)),	
+			Dest = util:hash(K,Nodes),
 			if Dest == Name -> hmSite(Name,K,V,N,true,Loc,IDs);
 			   true ->
 				   %io:format("K is ~s V is ~s H is ~b N is ~b~n",[K,V,hash(K,N),Name]),
@@ -80,8 +81,9 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
 			end;
 		{query,K,A,Init} ->
-			Dest = util:hash(K,N),
-			io:format("To ~b~n",[Dest]),
+			Nodes = round(pow(2,N)),
+			Dest = util:hash(K,Nodes),
+			%io:format("To ~b~n",[Dest]),
 			if Dest == Name->
 				   if Ready -> 
 					      %io:format("In ~b K is ~s V is ~s to Agent ~b is ~w~n",[Name,Key,Value,A,Ready]),
@@ -89,7 +91,7 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 					      hmSite(Name,Key,Value,N,Ready,Loc,IDs);
 				      not Ready -> 
 					      NewIDs = IDs ++ [{A,Init}],
-					     %io:format("Wait ~b~n",[Name]),
+					      %io:format("Wait ~b~n",[Name]),
 					      hmSite(Name,Key,Value,N,Ready,Loc,NewIDs)
 				   end;
 			   true ->
@@ -118,11 +120,14 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 checkRoute(From,Dest,N,Num) -> 
 	Guess = (round(pow(2,N)) + From)  rem round(pow(2,Num)),
 	NextGuess = (round(pow(2,N+1)) + From) rem round(pow(2,Num)),
+	D1 = abs(Dest - Guess),
+	D2 = abs(Dest - NextGuess),
 	%io:format("L: ~b G: ~b N:~b~n",[Dest,Guess,N]),
 	if 
 		N >= (Num-1) -> Guess;       %longest path
 		Guess == Dest -> Guess;  %found
-		Dest < NextGuess-> Guess; %closet path
+		Dest < NextGuess-> Guess; %cloest forward guess
+		D1 < D2 -> Guess; %fulfillment
 		
 		true -> checkRoute(From,Dest,N+1,Num)
 	end.
@@ -130,9 +135,9 @@ checkRoute(From,Dest,N,Num) ->
 start() ->
 	{ok, [N]} = io:fread("", "~d"),
 	Nodes = round(math:pow(2, N)),
-	io:format("With ~b nodes, key \"cat\" belongs in node ~b  in Node~p~n \n", [Nodes, util:hash("cat", Nodes),node()]),
+	io:format("With ~b nodes, key \"testing\" belongs in node ~b  in Node~p~n \n", [Nodes, util:hash("testing", Nodes),node()]),
 	%io:fromat("Host: ~w~n",[nodes()]),
-	%ClientAgent = spawn(main,clientPrint,[]),
-	%register(client, ClientAgent),
-	%siteCreator(Nodes-1,N,ClientAgent),
-	%processRequests().
+	ClientAgent = spawn(main,clientPrint,[]),
+	register(client, ClientAgent),
+	siteCreator(Nodes-1,N,ClientAgent),
+	processRequests().
