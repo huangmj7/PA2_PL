@@ -27,3 +27,10 @@ Potential Bug: - if the input is incorrect(ie. fromNode in query is greater than
 Simulation: - the program has tested with 4 VMs, and it worked out as expected when commands is inputted after 
 			  all 4 VMs are completely set up
 			- the program has also tested with 2^6 nodes and it worked out as expected
+Compile & Run: example input1:
+				   $ bash run.sh
+				   4
+				   insert 2 testing foo
+				   insert 1 bestclass ProgLang
+				   query 3 8 bestclass
+				   query 12 1 testing
