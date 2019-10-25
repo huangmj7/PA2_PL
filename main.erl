@@ -1,9 +1,8 @@
 -module(main).
--export([start/0,hashMapSite/3,siteCreator/3,hmSite/7,checkRoute/4,isSame/2,clientPrint/0]).
+-export([start/0,hashMapSite/3,siteCreator/3,hmSite/6,checkRoute/4,isSame/2,clientPrint/0]).
 -import(util,[hash/2,getRandomNode/0]).
 -import(math,[pow/2]).
 -import(timer,[sleep/1]).
--import(lists,[append/2]).
 %-compile(export_all).
 
 % NOTE: Any function called with spawn/ MUST be exported
@@ -44,7 +43,7 @@ processRequests() ->
 
 clientPrint() ->
 	receive 
-		{K,V,N,{A,I}} ->
+		{K,{ok,V},N,{A,I}} ->
 			io:format("Request ~b sent to agent ~b: Value for key ~s stored in node ~b: ~s~n",[A,I,K,N,V]),
 			clientPrint()
 	after 
@@ -58,27 +57,29 @@ hashMapSite(Key,Value,Node) ->
 siteCreator(-1,Num,Address) -> true;%io:fwrite(" ~b done~n",[Num]);
 siteCreator(N,Num,Address) -> 
 	%io:fwrite("~b ",[N]),
-	Site = spawn(main,hmSite,[N,"_null_","_null_",Num,false,Address,[]]),
+	Site = spawn(main,hmSite,[N,maps:from_list([]),Num,false,Address,[]]),
 	Name = list_to_atom(integer_to_list(N)),
 	register(Name,Site),
 	siteCreator(N-1,Num,Address).
 
 isSame(I1,A2) -> list_to_atom(integer_to_list(I1)) == A2.
-hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
+hmSite(Name,KeyValue,N,Ready,Loc,IDs)->
 
 	receive
-		{K,V} -> hmSite(Name,K,V,N,Ready,Loc,IDs);
+		%{K,V} -> hmSite(Name,K,V,N,Ready,Loc,IDs);
 		{insert,K,V} ->
 		        Nodes = round(pow(2,N)),	
 			Dest = util:hash(K,Nodes),
-			if Dest == Name -> hmSite(Name,K,V,N,true,Loc,IDs);
+			if Dest == Name -> 
+				   NewKeyValue = maps:put(K,V,KeyValue),
+				   hmSite(Name,NewKeyValue,N,true,Loc,IDs);
 			   true ->
 				   %io:format("K is ~s V is ~s H is ~b N is ~b~n",[K,V,hash(K,N),Name]),
 				   NewDest = checkRoute(Name,Dest,0,N),
 				   NewDestName = list_to_atom(integer_to_list(NewDest)),
 				   NewDestName ! {insert,K,V},
 				   %io:format("sending to ~b~n",[NewDest]),
-				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
+				   hmSite(Name,KeyValue,N,Ready,Loc,IDs)
 			end;
 		{query,K,A,Init} ->
 			Nodes = round(pow(2,N)),
@@ -87,30 +88,32 @@ hmSite(Name,Key,Value,N,Ready,Loc,IDs)->
 			if Dest == Name->
 				   if Ready -> 
 					      %io:format("In ~b K is ~s V is ~s to Agent ~b is ~w~n",[Name,Key,Value,A,Ready]),
+					      Key = K,
+					      Value = maps:find(Key,KeyValue),  
 					      Loc ! {Key,Value,Name,{A,Init}},
-					      hmSite(Name,Key,Value,N,Ready,Loc,IDs);
+					      hmSite(Name,KeyValue,N,Ready,Loc,IDs);
 				      not Ready -> 
-					      NewIDs = IDs ++ [{A,Init}],
+					      NewIDs = IDs ++ [{A,Init,K}],
 					      %io:format("Wait ~b~n",[Name]),
-					      hmSite(Name,Key,Value,N,Ready,Loc,NewIDs)
+					      hmSite(Name,KeyValue,N,Ready,Loc,NewIDs)
 				   end;
 			   true ->
 				   NewDest = checkRoute(Name,Dest,0,N),
 				   NewDestName = list_to_atom(integer_to_list(NewDest)),
 				   NewDestName ! {query,K,A,Init},
 				   %io:format("~b ask other ~b~n",[Name,NewDest]),
-				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
+				   hmSite(Name,KeyValue,N,Ready,Loc,IDs)
 			end;
 
-		stop -> io:format("V:~s K:~s ~n",[Key,Value])
+		stop -> io:format("Stopped~n")
 
 	after 
 		0 ->
 			if Ready ->
-				   [ Loc ! {Key,Value,Name,X} || X <- IDs],
-				   hmSite(Name,Key,Value,N,Ready,Loc,[]);
+				   [Loc ! {K,maps:find(K,KeyValue),Name,{A,I}}|| {A,I,K} <- IDs], %crash if invalid key applied, which should never happen
+				   hmSite(Name,KeyValue,N,Ready,Loc,[]);
 			   true -> 
-				   hmSite(Name,Key,Value,N,Ready,Loc,IDs)
+				   hmSite(Name,KeyValue,N,Ready,Loc,IDs)
 			end	
 	end.
 
@@ -135,9 +138,14 @@ checkRoute(From,Dest,N,Num) ->
 start() ->
 	{ok, [N]} = io:fread("", "~d"),
 	Nodes = round(math:pow(2, N)),
-	io:format("With ~b nodes, key \"testing\" belongs in node ~b  in Node~p~n \n", [Nodes, util:hash("testing", Nodes),node()]),
-	%io:fromat("Host: ~w~n",[nodes()]),
-	ClientAgent = spawn(main,clientPrint,[]),
-	register(client, ClientAgent),
-	siteCreator(Nodes-1,N,ClientAgent),
-	processRequests().
+	io:format("With ~b nodes, key \"testing\" belongs in node ~b  in Node ~p~n \n", [Nodes, util:hash("testing", Nodes),node()]).
+	%[io:fromat("Host: ~p~n",[NA]) || NA <- nodes()].
+	%ClientAgent = spawn(main,clientPrint,[]),
+	%register(client, ClientAgent),
+	%siteCreator(Nodes-1,N,ClientAgent),
+	%processRequests().
+	%Test = maps:from_list([{"cat",1},{"fish",2}]),
+	%io:fwrite("IO find ~p~n",[maps:get("cat",Test)]),
+	 %io:fwrite("IO find ~p~n",[maps:put("t","ea",Test)]),
+	%io:fwrite("IO find ~p~n",[maps:find("t",Test)]).
+
